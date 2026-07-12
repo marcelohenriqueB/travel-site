@@ -19,7 +19,11 @@ async function submitForgotPassword() {
       clientUid: tenantState.clientUid,
       identificador: form.identificador,
     })
-    message.value = response.mensagem || 'Se os dados estiverem corretos, enviaremos as instrucoes.'
+    if (response.email_enviado) {
+      message.value = 'Enviamos o link de recuperacao para o email cadastrado.'
+    } else {
+      error.value = 'Nao foi possivel enviar o email. Verifique se o cadastro possui email ou tente outro identificador.'
+    }
   } catch (err) {
     error.value = err.message
   } finally {
