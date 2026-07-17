@@ -14,6 +14,7 @@ const message = ref('')
 const form = reactive({
   nome: '',
   email: '',
+  cpf_cnpj: '',
   telefone: '',
   postal_code: '',
   address: '',
@@ -52,6 +53,7 @@ function formatCep(value) {
 function fillForm(customer = {}) {
   form.nome = customer.nome || ''
   form.email = customer.email || ''
+  form.cpf_cnpj = customer.cpf_cnpj || ''
   form.telefone = formatPhone(customer.telefone || '')
   form.postal_code = formatCep(customer.postal_code || '')
   form.address = customer.address || ''
@@ -86,8 +88,6 @@ async function submitProfile() {
   try {
     const response = await updateCustomerProfile(
       {
-        nome: form.nome.trim(),
-        email: form.email.trim(),
         telefone: onlyDigits(form.telefone),
         postal_code: onlyDigits(form.postal_code),
         address: form.address.trim(),
@@ -135,14 +135,18 @@ async function submitProfile() {
           <div class="mt-4 grid gap-4 sm:grid-cols-2">
             <label class="grid gap-1 text-sm font-bold text-slate-600">
               Nome
-              <input v-model="form.nome" required class="h-12 rounded border border-slate-300 px-3 outline-sky-500" />
+              <input v-model="form.nome" readonly class="h-12 rounded border border-slate-200 bg-slate-50 px-3 text-slate-500 outline-none" />
             </label>
             <label class="grid gap-1 text-sm font-bold text-slate-600">
               E-mail
-              <span class="flex h-12 items-center gap-3 rounded border border-slate-300 px-3 focus-within:border-[var(--brand-primary)] focus-within:ring-4 focus-within:ring-sky-100">
+              <span class="flex h-12 items-center gap-3 rounded border border-slate-200 bg-slate-50 px-3 text-slate-500">
                 <Mail class="size-4 text-slate-400" />
-                <input v-model="form.email" type="email" class="h-full min-w-0 flex-1 border-0 bg-transparent p-0 outline-none" />
+                <input v-model="form.email" readonly type="email" class="h-full min-w-0 flex-1 border-0 bg-transparent p-0 outline-none" />
               </span>
+            </label>
+            <label class="grid gap-1 text-sm font-bold text-slate-600">
+              CPF/CNPJ
+              <input v-model="form.cpf_cnpj" readonly class="h-12 rounded border border-slate-200 bg-slate-50 px-3 text-slate-500 outline-none" />
             </label>
             <label class="grid gap-1 text-sm font-bold text-slate-600">
               Telefone
