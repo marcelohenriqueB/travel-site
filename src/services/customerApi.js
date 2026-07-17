@@ -105,6 +105,18 @@ export async function resetCustomerPassword(payload) {
   })
 }
 
+export async function getCustomerProfile(token) {
+  return apiRequest('/api/customer/perfil/', { token })
+}
+
+export async function updateCustomerProfile(payload, token) {
+  return apiRequest('/api/customer/perfil/', {
+    method: 'PATCH',
+    token,
+    body: JSON.stringify(payload),
+  })
+}
+
 export async function listSuites(params = {}, token) {
   const search = new URLSearchParams(params).toString()
   return apiRequest(`/api/customer/suites/${search ? `?${search}` : ''}`, { token })

@@ -1,0 +1,28 @@
+@import "tailwindcss";
+
+:root {
+  --brand-primary: #0ea5e9;
+  --brand-secondary: #082f49;
+  --brand-bg: #f7fbff;
+  --brand-text: #12324a;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  background: var(--brand-bg);
+  font-family:
+    "Manrope", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
+  color: var(--brand-text);
+}
+
+#app {
+  min-height: 100svh;
+}
+
+button,
+select,
+input {
+  font: inherit;
+}
