@@ -1,14 +1,16 @@
 <script setup>
 import { computed, reactive, ref } from 'vue'
 import { useRoute, useRouter, RouterLink } from 'vue-router'
-import { ArrowLeft, Eye, EyeOff, LockKeyhole, LogIn, ShieldCheck, UserRound } from '@lucide/vue'
-import { loginCustomer } from '../stores/authStore'
+import { ArrowLeft, Eye, EyeOff, IdCard, LockKeyhole, LogIn, Mail, Phone, ShieldCheck, UserPlus, UserRound } from '@lucide/vue'
+import { loginCustomer, registerCustomer } from '../stores/authStore'
 import { tenantState } from '../stores/tenantStore'
 
 const route = useRoute()
 const router = useRouter()
 const loading = ref(false)
 const error = ref('')
+const success = ref('')
+const mode = ref('login')
 const showPassword = ref(false)
 
 const form = reactive({
@@ -16,15 +18,32 @@ const form = reactive({
   senha: '',
 })
 
+const registerForm = reactive({
+  nome: '',
+  email: '',
+  telefone: '',
+  cpf_cnpj: '',
+  senha: '',
+  confirmar_senha: '',
+})
+
 const tenantName = computed(() => tenantState.client.site_titulo || tenantState.client.name || '')
 const tenantSubtitle = computed(() => tenantState.client.site_subtitulo || 'Acesse sua conta para acompanhar reservas e finalizar compras.')
 const heroImage = computed(() => tenantState.client.capa || tenantState.client.banner_site || '')
 const logoInitial = computed(() => tenantName.value.charAt(0).toUpperCase())
 const redirectTarget = computed(() => route.query.redirect || '/')
+const isLoginMode = computed(() => mode.value === 'login')
+
+function setMode(nextMode) {
+  mode.value = nextMode
+  error.value = ''
+  success.value = ''
+}
 
 async function submitLogin() {
   loading.value = true
   error.value = ''
+  success.value = ''
 
   try {
     await loginCustomer({
@@ -32,6 +51,49 @@ async function submitLogin() {
       identificador: form.identificador,
       senha: form.senha,
     })
+    await router.push(redirectTarget.value)
+  } catch (err) {
+    error.value = err.message
+  } finally {
+    loading.value = false
+  }
+}
+
+async function submitRegister() {
+  loading.value = true
+  error.value = ''
+  success.value = ''
+
+  if (registerForm.senha !== registerForm.confirmar_senha) {
+    error.value = 'As senhas informadas nao conferem.'
+    loading.value = false
+    return
+  }
+
+  if (!registerForm.cpf_cnpj && !registerForm.telefone) {
+    error.value = 'Informe CPF/CNPJ ou telefone para criar o cadastro.'
+    loading.value = false
+    return
+  }
+
+  try {
+    const response = await registerCustomer({
+      clientUid: tenantState.clientUid,
+      nome: registerForm.nome,
+      email: registerForm.email,
+      telefone: registerForm.telefone,
+      cpfCnpj: registerForm.cpf_cnpj,
+      senha: registerForm.senha,
+    })
+
+    if (!response.access) {
+      await loginCustomer({
+        clientUid: tenantState.clientUid,
+        identificador: registerForm.cpf_cnpj || registerForm.telefone || registerForm.email,
+        senha: registerForm.senha,
+      })
+    }
+
     await router.push(redirectTarget.value)
   } catch (err) {
     error.value = err.message
@@ -83,7 +145,7 @@ async function submitLogin() {
         </div>
       </div>
 
-      <form class="flex flex-col justify-center p-6 sm:p-10 lg:p-12" @submit.prevent="submitLogin">
+      <form class="flex flex-col justify-center p-6 sm:p-10 lg:p-12" @submit.prevent="isLoginMode ? submitLogin() : submitRegister()">
         <RouterLink class="mb-8 inline-flex w-fit items-center gap-2 text-sm font-black text-slate-500 transition hover:text-sky-900 lg:hidden" to="/">
           <ArrowLeft class="size-4" />
           Voltar
@@ -99,11 +161,34 @@ async function submitLogin() {
 
         <div>
           <p class="text-sm font-black uppercase tracking-[0.18em] text-[var(--brand-primary)]">Area do cliente</p>
-          <h2 class="mt-3 text-3xl font-black leading-tight text-sky-950">Entre na sua conta</h2>
-          <p class="mt-2 text-sm font-semibold leading-6 text-slate-500">Use email, telefone ou CPF/CNPJ cadastrado.</p>
+          <h2 class="mt-3 text-3xl font-black leading-tight text-sky-950">{{ isLoginMode ? 'Entre na sua conta' : 'Crie sua conta' }}</h2>
+          <p class="mt-2 text-sm font-semibold leading-6 text-slate-500">
+            {{ isLoginMode ? 'Use email, telefone ou CPF/CNPJ cadastrado.' : 'Cadastre seus dados para acompanhar reservas e finalizar compras.' }}
+          </p>
         </div>
 
-        <div class="mt-8 grid gap-5">
+        <div class="mt-8 grid grid-cols-2 rounded-lg border border-slate-200 bg-slate-50 p-1">
+          <button
+            class="flex h-11 items-center justify-center gap-2 rounded-md text-sm font-black transition"
+            :class="isLoginMode ? 'bg-white text-[var(--brand-primary)] shadow-sm' : 'text-slate-500 hover:text-sky-950'"
+            type="button"
+            @click="setMode('login')"
+          >
+            <LogIn class="size-4" />
+            Entrar
+          </button>
+          <button
+            class="flex h-11 items-center justify-center gap-2 rounded-md text-sm font-black transition"
+            :class="!isLoginMode ? 'bg-white text-[var(--brand-primary)] shadow-sm' : 'text-slate-500 hover:text-sky-950'"
+            type="button"
+            @click="setMode('register')"
+          >
+            <UserPlus class="size-4" />
+            Cadastrar-se
+          </button>
+        </div>
+
+        <div v-if="isLoginMode" class="mt-6 grid gap-5">
           <label class="grid gap-2 text-sm font-bold text-slate-600">
             Email, telefone ou CPF/CNPJ
             <span class="flex h-13 items-center gap-3 rounded-lg border border-slate-300 bg-white px-4 ring-[var(--brand-primary)]/20 focus-within:border-[var(--brand-primary)] focus-within:ring-4">
@@ -143,22 +228,131 @@ async function submitLogin() {
           </label>
         </div>
 
-        <div class="mt-4 flex justify-end">
+        <div v-else class="mt-6 grid gap-5">
+          <label class="grid gap-2 text-sm font-bold text-slate-600">
+            Nome completo
+            <span class="flex h-13 items-center gap-3 rounded-lg border border-slate-300 bg-white px-4 ring-[var(--brand-primary)]/20 focus-within:border-[var(--brand-primary)] focus-within:ring-4">
+              <UserRound class="size-5 shrink-0 text-slate-400" />
+              <input
+                v-model.trim="registerForm.nome"
+                required
+                autocomplete="name"
+                class="h-full min-w-0 flex-1 border-0 bg-transparent p-0 text-slate-900 outline-none placeholder:text-slate-400"
+                placeholder="Seu nome"
+              />
+            </span>
+          </label>
+
+          <label class="grid gap-2 text-sm font-bold text-slate-600">
+            Email
+            <span class="flex h-13 items-center gap-3 rounded-lg border border-slate-300 bg-white px-4 ring-[var(--brand-primary)]/20 focus-within:border-[var(--brand-primary)] focus-within:ring-4">
+              <Mail class="size-5 shrink-0 text-slate-400" />
+              <input
+                v-model.trim="registerForm.email"
+                type="email"
+                autocomplete="email"
+                class="h-full min-w-0 flex-1 border-0 bg-transparent p-0 text-slate-900 outline-none placeholder:text-slate-400"
+                placeholder="email@exemplo.com"
+              />
+            </span>
+          </label>
+
+          <div class="grid gap-5 sm:grid-cols-2">
+            <label class="grid gap-2 text-sm font-bold text-slate-600">
+              Telefone
+              <span class="flex h-13 items-center gap-3 rounded-lg border border-slate-300 bg-white px-4 ring-[var(--brand-primary)]/20 focus-within:border-[var(--brand-primary)] focus-within:ring-4">
+                <Phone class="size-5 shrink-0 text-slate-400" />
+                <input
+                  v-model.trim="registerForm.telefone"
+                  autocomplete="tel"
+                  inputmode="tel"
+                  class="h-full min-w-0 flex-1 border-0 bg-transparent p-0 text-slate-900 outline-none placeholder:text-slate-400"
+                  placeholder="92999999999"
+                />
+              </span>
+            </label>
+
+            <label class="grid gap-2 text-sm font-bold text-slate-600">
+              CPF/CNPJ
+              <span class="flex h-13 items-center gap-3 rounded-lg border border-slate-300 bg-white px-4 ring-[var(--brand-primary)]/20 focus-within:border-[var(--brand-primary)] focus-within:ring-4">
+                <IdCard class="size-5 shrink-0 text-slate-400" />
+                <input
+                  v-model.trim="registerForm.cpf_cnpj"
+                  autocomplete="off"
+                  inputmode="numeric"
+                  class="h-full min-w-0 flex-1 border-0 bg-transparent p-0 text-slate-900 outline-none placeholder:text-slate-400"
+                  placeholder="Somente numeros"
+                />
+              </span>
+            </label>
+          </div>
+
+          <label class="grid gap-2 text-sm font-bold text-slate-600">
+            Senha
+            <span class="flex h-13 items-center gap-3 rounded-lg border border-slate-300 bg-white px-4 ring-[var(--brand-primary)]/20 focus-within:border-[var(--brand-primary)] focus-within:ring-4">
+              <LockKeyhole class="size-5 shrink-0 text-slate-400" />
+              <input
+                v-model="registerForm.senha"
+                required
+                minlength="6"
+                :type="showPassword ? 'text' : 'password'"
+                autocomplete="new-password"
+                class="h-full min-w-0 flex-1 border-0 bg-transparent p-0 text-slate-900 outline-none placeholder:text-slate-400"
+                placeholder="Minimo 6 caracteres"
+              />
+              <button
+                class="grid size-9 shrink-0 place-items-center rounded-full text-slate-500 transition hover:bg-slate-100 hover:text-sky-950"
+                type="button"
+                :aria-label="showPassword ? 'Ocultar senha' : 'Mostrar senha'"
+                @click="showPassword = !showPassword"
+              >
+                <EyeOff v-if="showPassword" class="size-5" />
+                <Eye v-else class="size-5" />
+              </button>
+            </span>
+          </label>
+
+          <label class="grid gap-2 text-sm font-bold text-slate-600">
+            Confirmar senha
+            <span class="flex h-13 items-center gap-3 rounded-lg border border-slate-300 bg-white px-4 ring-[var(--brand-primary)]/20 focus-within:border-[var(--brand-primary)] focus-within:ring-4">
+              <LockKeyhole class="size-5 shrink-0 text-slate-400" />
+              <input
+                v-model="registerForm.confirmar_senha"
+                required
+                minlength="6"
+                :type="showPassword ? 'text' : 'password'"
+                autocomplete="new-password"
+                class="h-full min-w-0 flex-1 border-0 bg-transparent p-0 text-slate-900 outline-none placeholder:text-slate-400"
+                placeholder="Repita a senha"
+              />
+            </span>
+          </label>
+        </div>
+
+        <div v-if="isLoginMode" class="mt-4 flex justify-end">
           <RouterLink class="text-sm font-black text-[var(--brand-primary)] transition hover:opacity-75" to="/esqueci-senha">
             Esqueci minha senha
           </RouterLink>
         </div>
 
         <p v-if="error" class="mt-5 rounded-lg border border-red-100 bg-red-50 p-3 text-sm font-bold text-red-700">{{ error }}</p>
+        <p v-if="success" class="mt-5 rounded-lg border border-emerald-100 bg-emerald-50 p-3 text-sm font-bold text-emerald-700">{{ success }}</p>
 
         <button class="mt-7 flex h-13 w-full items-center justify-center gap-2 rounded-lg bg-[var(--brand-primary)] text-sm font-black uppercase text-white shadow-lg shadow-sky-900/10 transition hover:brightness-95 disabled:bg-slate-300 disabled:shadow-none" :disabled="loading">
-          <LogIn class="size-4" />
-          {{ loading ? 'Entrando...' : 'Entrar' }}
+          <LogIn v-if="isLoginMode" class="size-4" />
+          <UserPlus v-else class="size-4" />
+          {{ loading ? (isLoginMode ? 'Entrando...' : 'Cadastrando...') : (isLoginMode ? 'Entrar' : 'Criar cadastro') }}
         </button>
 
         <div class="mt-6 rounded-lg bg-slate-50 p-4 text-sm font-bold text-slate-500">
-          Ainda nao tem cadastro? Voce pode criar sua conta durante a reserva.
-          <RouterLink class="ml-1 text-[var(--brand-primary)] hover:opacity-75" to="/buscar">Buscar passagem</RouterLink>
+          <template v-if="isLoginMode">
+            Ainda nao tem cadastro?
+            <button class="ml-1 text-[var(--brand-primary)] hover:opacity-75" type="button" @click="setMode('register')">Cadastrar-se agora</button>
+          </template>
+          <template v-else>
+            Ja tem cadastro?
+            <button class="ml-1 text-[var(--brand-primary)] hover:opacity-75" type="button" @click="setMode('login')">Entrar na minha conta</button>
+          </template>
         </div>
       </form>
     </section>
