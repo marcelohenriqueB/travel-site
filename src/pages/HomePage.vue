@@ -3,22 +3,23 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 import { useRouter } from 'vue-router'
 import { CalendarDays, MapPin, Search, Ship, UsersRound } from '@lucide/vue'
+import AvailableDatePicker from '../components/AvailableDatePicker.vue'
 import PublicBoatsSection from '../components/PublicBoatsSection.vue'
 import TicketGrid from '../components/TicketGrid.vue'
 import heroImage from '../assets/hero-amazonia.jpg'
-import { tickets } from '../data'
 import { listPublicBoats, listPublicRoutes } from '../services/customerApi'
-import { cachePublicRoutes } from '../stores/publicRouteStore'
+import { cachePublicRoutes, cachePublicTickets, mapPublicRouteToTicket } from '../stores/publicRouteStore'
 import { tenantState } from '../stores/tenantStore'
 import { getTodayDateInputValue, normalizeApiCollection } from '../utils/formatters'
+import { getAvailableDatePrices, getAvailableDates, sortRoutesByDemand } from '../utils/routeDiscovery'
 
 const today = getTodayDateInputValue()
 const router = useRouter()
 const routeResults = ref(null)
+const routeCatalog = ref(null)
 const boats = ref([])
 const loadingBoats = ref(false)
-const loadingRoutes = ref(false)
-const usingFallback = ref(false)
+const loadingRoutes = ref(true)
 const searchForm = reactive({
   origin: '',
   destination: '',
@@ -27,9 +28,20 @@ const searchForm = reactive({
   embarcacaoId: '',
 })
 
-const initialTickets = computed(() => (routeResults.value ?? tickets).slice(0, 5))
-const originOptions = computed(() => getUniqueOptions(routeResults.value || tickets, 'origin'))
-const destinationOptions = computed(() => getUniqueOptions(routeResults.value || tickets, 'destination'))
+const routeSource = computed(() => routeCatalog.value?.length ? routeCatalog.value : routeResults.value ?? [])
+const initialTickets = computed(() => sortRoutesByDemand(routeSource.value).slice(0, 5))
+const originOptions = computed(() => getUniqueOptions(routeSource.value, 'origin'))
+const destinationOptions = computed(() => getUniqueOptions(routeSource.value, 'destination'))
+const availableDates = computed(() => getAvailableDates(routeSource.value, {
+  origin: searchForm.origin,
+  destination: searchForm.destination,
+  embarcacaoId: searchForm.embarcacaoId,
+}))
+const availableDatePrices = computed(() => getAvailableDatePrices(routeSource.value, {
+  origin: searchForm.origin,
+  destination: searchForm.destination,
+  embarcacaoId: searchForm.embarcacaoId,
+}))
 const homeHeroImage = computed(() => tenantState.client.banner_site || tenantState.client.capa || heroImage)
 const siteTitle = computed(() => tenantState.client.site_titulo || tenantState.client.name || '')
 const siteSubtitle = computed(() => tenantState.client.site_subtitulo || 'Viagens fluviais com reserva simples e segura')
@@ -37,6 +49,8 @@ const siteDescription = computed(() => tenantState.client.site_descricao || 'Con
 
 onMounted(async () => {
   await loadBoats()
+  await fetchRouteCatalog()
+  syncSearchDateWithAvailability()
   await fetchInitialRoutes()
 })
 
@@ -61,24 +75,42 @@ async function loadBoats() {
 
 async function fetchInitialRoutes() {
   if (!tenantState.clientUid) {
+    loadingRoutes.value = false
     return
   }
 
   loadingRoutes.value = true
-  usingFallback.value = false
 
   try {
     const response = await listPublicRoutes({
       client_uid: tenantState.clientUid,
-      data: today,
+      data: searchForm.departureDate || today,
     })
     const routes = normalizeApiCollection(response, 'rotas')
-    routeResults.value = cachePublicRoutes(routes, today)
+    routeResults.value = cachePublicRoutes(routes, searchForm.departureDate || today)
+    if (routeCatalog.value?.length) {
+      cachePublicTickets([...routeCatalog.value, ...routeResults.value])
+    }
   } catch {
-    usingFallback.value = true
-    routeResults.value = null
+    routeResults.value = []
   } finally {
     loadingRoutes.value = false
+  }
+}
+
+async function fetchRouteCatalog() {
+  if (!tenantState.clientUid) {
+    return
+  }
+
+  try {
+    const response = await listPublicRoutes({
+      client_uid: tenantState.clientUid,
+    })
+    const routes = normalizeApiCollection(response, 'rotas')
+    routeCatalog.value = cachePublicTickets(routes.map((route) => mapPublicRouteToTicket(route, today)))
+  } catch {
+    routeCatalog.value = null
   }
 }
 
@@ -86,7 +118,17 @@ function getUniqueOptions(items, key) {
   return [...new Set(items.map((item) => item[key]).filter(Boolean))]
 }
 
+function syncSearchDateWithAvailability() {
+  if (!availableDates.value.length || availableDates.value.includes(searchForm.departureDate)) {
+    return
+  }
+
+  searchForm.departureDate = availableDates.value[0]
+}
+
 async function submitHomeSearch() {
+  syncSearchDateWithAvailability()
+
   await router.push({
     name: 'filter',
     query: {
@@ -129,7 +171,7 @@ async function submitHomeSearch() {
           <div class="grid gap-3 lg:grid-cols-[1fr_1fr_1fr_0.8fr_auto]">
             <label class="flex h-12 items-center gap-2 rounded border border-slate-300 px-3 text-slate-600">
               <MapPin class="size-4 text-[var(--brand-primary)]" />
-              <select v-model="searchForm.origin" class="w-full bg-transparent text-sm font-semibold outline-none">
+              <select v-model="searchForm.origin" class="w-full bg-transparent text-sm font-semibold outline-none" @change="syncSearchDateWithAvailability">
                 <option value="">Origem</option>
                 <option v-for="origin in originOptions" :key="origin" :value="origin">{{ origin }}</option>
               </select>
@@ -137,7 +179,7 @@ async function submitHomeSearch() {
 
             <label class="flex h-12 items-center gap-2 rounded border border-slate-300 px-3 text-slate-600">
               <MapPin class="size-4 text-[var(--brand-primary)]" />
-              <select v-model="searchForm.destination" class="w-full bg-transparent text-sm font-semibold outline-none">
+              <select v-model="searchForm.destination" class="w-full bg-transparent text-sm font-semibold outline-none" @change="syncSearchDateWithAvailability">
                 <option value="">Destino</option>
                 <option v-for="destination in destinationOptions" :key="destination" :value="destination">
                   {{ destination }}
@@ -147,7 +189,7 @@ async function submitHomeSearch() {
 
             <label class="flex h-12 items-center gap-2 rounded border border-slate-300 px-3 text-slate-600">
               <CalendarDays class="size-4 text-[var(--brand-primary)]" />
-              <input v-model="searchForm.departureDate" required class="w-full bg-transparent text-sm font-semibold outline-none" type="date" />
+              <AvailableDatePicker v-model="searchForm.departureDate" :available-dates="availableDates" :date-prices="availableDatePrices" />
             </label>
 
             <label class="flex h-12 items-center gap-2 rounded border border-slate-300 px-3 text-slate-600">
@@ -173,13 +215,13 @@ async function submitHomeSearch() {
           <div class="mt-3 grid gap-3 md:grid-cols-[1fr_auto]">
             <label class="flex h-12 items-center gap-2 rounded border border-slate-300 px-3 text-slate-600">
               <Ship class="size-4 text-[var(--brand-primary)]" />
-              <select v-model="searchForm.embarcacaoId" class="w-full bg-transparent text-sm font-semibold outline-none">
+              <select v-model="searchForm.embarcacaoId" class="w-full bg-transparent text-sm font-semibold outline-none" @change="syncSearchDateWithAvailability">
                 <option value="">Todas as embarcacoes</option>
                 <option v-for="boat in boats" :key="boat.id" :value="boat.id">{{ boat.nome }}</option>
               </select>
             </label>
 
-            <RouterLink class="inline-flex h-12 items-center justify-center rounded border border-slate-300 px-5 text-sm font-black text-sky-950" :to="{ name: 'filter', query: { data: today } }">
+            <RouterLink class="inline-flex h-12 items-center justify-center rounded border border-slate-300 px-5 text-sm font-black text-sky-950" :to="{ name: 'filter', query: { data: searchForm.departureDate || today } }">
               Busca avancada
             </RouterLink>
           </div>
@@ -195,8 +237,7 @@ async function submitHomeSearch() {
     />
 
     <TicketGrid
-      title="Rotas de hoje"
-      :subtitle="usingFallback ? 'Dados de exemplo' : ''"
+      title="Rotas mais procuradas"
       :tickets="initialTickets"
       :total-count="initialTickets.length"
       :loading="loadingRoutes"
@@ -205,7 +246,7 @@ async function submitHomeSearch() {
     <section class="mx-auto max-w-6xl px-4 pb-12 sm:px-6">
       <RouterLink
         class="inline-flex h-12 items-center justify-center gap-2 rounded bg-[var(--brand-primary)] px-6 text-sm font-black uppercase text-white transition hover:brightness-95"
-        :to="{ name: 'filter', query: { data: today } }"
+        :to="{ name: 'filter', query: { data: searchForm.departureDate || today } }"
       >
         <Ship class="size-4" />
         Ver todas as rotas e filtros

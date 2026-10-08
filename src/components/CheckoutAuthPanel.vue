@@ -4,6 +4,7 @@ import { RouterLink } from 'vue-router'
 import { LogIn, UserPlus } from '@lucide/vue'
 import { loginCustomer, registerCustomer } from '../stores/authStore'
 import { tenantState } from '../stores/tenantStore'
+import { formatCpfCnpj, formatPhone, onlyDigits } from '../utils/documentFormatters'
 
 const emit = defineEmits(['authenticated'])
 
@@ -45,8 +46,8 @@ async function submitLogin() {
 }
 
 async function submitRegister() {
-  const telefone = registerForm.telefone.trim()
-  const cpfCnpj = registerForm.cpf_cnpj.trim()
+  const telefone = onlyDigits(registerForm.telefone)
+  const cpfCnpj = onlyDigits(registerForm.cpf_cnpj)
 
   if (!telefone && !cpfCnpj) {
     error.value = 'Informe CPF/CNPJ ou telefone para cadastrar.'
@@ -132,12 +133,22 @@ async function submitRegister() {
 
     <form v-else class="mt-5 grid gap-4" @submit.prevent="submitRegister">
       <input v-model="registerForm.nome" required class="h-12 rounded border border-slate-300 px-3 outline-sky-500" placeholder="Nome completo" />
-      <div class="grid gap-4 sm:grid-cols-2">
-        <input v-model="registerForm.email" type="email" class="h-12 rounded border border-slate-300 px-3 outline-sky-500" placeholder="E-mail" />
-        <input v-model="registerForm.telefone" class="h-12 rounded border border-slate-300 px-3 outline-sky-500" placeholder="Telefone" />
-        <input v-model="registerForm.cpf_cnpj" class="h-12 rounded border border-slate-300 px-3 outline-sky-500" placeholder="CPF/CNPJ" />
-        <input v-model="registerForm.senha" required minlength="6" type="password" class="h-12 rounded border border-slate-300 px-3 outline-sky-500" placeholder="Senha" />
-      </div>
+      <input v-model="registerForm.email" type="email" class="h-12 rounded border border-slate-300 px-3 outline-sky-500" placeholder="E-mail" />
+      <input
+        v-model="registerForm.telefone"
+        class="h-12 rounded border border-slate-300 px-3 outline-sky-500"
+        inputmode="tel"
+        placeholder="(92) 99999-9999"
+        @input="registerForm.telefone = formatPhone(registerForm.telefone)"
+      />
+      <input
+        v-model="registerForm.cpf_cnpj"
+        class="h-12 rounded border border-slate-300 px-3 outline-sky-500"
+        inputmode="numeric"
+        placeholder="000.000.000-00"
+        @input="registerForm.cpf_cnpj = formatCpfCnpj(registerForm.cpf_cnpj)"
+      />
+      <input v-model="registerForm.senha" required minlength="6" type="password" class="h-12 rounded border border-slate-300 px-3 outline-sky-500" placeholder="Senha" />
       <p class="text-xs font-bold text-slate-500">Informe CPF/CNPJ ou telefone. Senha minima de 6 caracteres.</p>
 
       <button class="h-12 rounded bg-[var(--brand-primary)] text-sm font-black uppercase text-white disabled:bg-slate-300" :disabled="loading">

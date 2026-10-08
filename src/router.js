@@ -7,6 +7,7 @@ import ForgotPasswordPage from './pages/ForgotPasswordPage.vue'
 import FilterPage from './pages/FilterPage.vue'
 import HomePage from './pages/HomePage.vue'
 import LoginPage from './pages/LoginPage.vue'
+import LegalPage from './pages/LegalPage.vue'
 import NotFoundPage from './pages/NotFoundPage.vue'
 import ReservationPage from './pages/ReservationPage.vue'
 import ResetPasswordPage from './pages/ResetPasswordPage.vue'
@@ -20,6 +21,8 @@ const router = createRouter({
     { path: '/login', name: 'login', component: LoginPage },
     { path: '/esqueci-senha', name: 'forgot-password', component: ForgotPasswordPage },
     { path: '/resetar-senha', name: 'reset-password', component: ResetPasswordPage },
+    { path: '/termos-de-uso', name: 'terms', component: LegalPage },
+    { path: '/politica-de-privacidade', name: 'privacy', component: LegalPage },
     { path: '/minhas-reservas', name: 'customer-reservations', component: CustomerReservationsPage },
     { path: '/minhas-reservas/:id', name: 'reservation-detail', component: CustomerReservationDetailPage },
     { path: '/meu-perfil', name: 'customer-profile', component: CustomerProfilePage },

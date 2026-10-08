@@ -3,10 +3,9 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
 import { BadgeCheck, Bed, CheckCircle2, CreditCard, LockKeyhole, Mail, MapPin, Phone, Plus, QrCode, ShieldCheck, Ship, Trash2, UserRound, UsersRound, Utensils, Waves } from '@lucide/vue'
 import CheckoutAuthPanel from '../components/CheckoutAuthPanel.vue'
-import { tickets } from '../data'
-import { buildReservationPayload, calculatePublicReservationValue, createCustomerReservation, listPublicAdicionais, listPublicSuites } from '../services/customerApi'
+import { buildReservationPayload, calculatePublicReservationValue, createCustomerReservation, listPublicAdicionais, listPublicRoutes, listPublicSuites } from '../services/customerApi'
 import { authState } from '../stores/authStore'
-import { getCachedPublicRoute } from '../stores/publicRouteStore'
+import { cachePublicTickets, getCachedPublicRoute, mapPublicRouteToTicket, publicRouteState } from '../stores/publicRouteStore'
 import { tenantState } from '../stores/tenantStore'
 import { formatDateBr, normalizeApiCollection } from '../utils/formatters'
 
@@ -20,11 +19,14 @@ const result = ref(null)
 const simulatedPrice = ref(null)
 const simulationLoading = ref(false)
 const simulationError = ref('')
+const termsAccepted = ref(false)
+const routeLoading = ref(true)
+const selectedTicket = ref(null)
 let simulationTimer = null
 const suites = ref([])
 const adicionaisOptions = ref([])
 
-const ticket = computed(() => getCachedPublicRoute(route.params.id) || tickets.find((item) => String(item.id) === String(route.params.id)))
+const ticket = computed(() => selectedTicket.value || getCachedPublicRoute(route.params.id, route.query.data))
 const isLoggedIn = computed(() => Boolean(authState.access))
 const stepItems = computed(() => [
   {
@@ -121,8 +123,15 @@ const simulatedTotalLabel = computed(() => formatCurrencyValue(simulatedTotal.va
 const selectedSuite = computed(() => suites.value.find((suite) => String(suite.id) === String(reservation.suiteId)) || null)
 const suiteIncludedLimit = computed(() => Number(selectedSuite.value?.passageiros_inclusos || 0))
 const suiteMarkedPassengers = computed(() => passengers.filter((item) => item.suite).length)
+const defaultCheckoutNoticeText = `Documentacao obrigatoria: Todos os passageiros devem apresentar documento oficial com foto durante o embarque.
+Menores de 16 anos: Criancas ou adolescentes nao podem viajar sozinhos ou acompanhados sem autorizacao autenticada em cartorio.
+Transporte de pets: A passagem nao inclui automaticamente o transporte de pets. O embarque esta sujeito a disponibilidade e limite por viagem.`
+const checkoutNoticeText = computed(() => tenantState.client.site_avisos_previos?.trim() || defaultCheckoutNoticeText)
+const noticeItems = computed(() => splitTextBlocks(checkoutNoticeText.value).map(parseNoticeItem))
 
 onMounted(async () => {
+  await loadSelectedRoute()
+
   if (!ticket.value) {
     return
   }
@@ -199,6 +208,41 @@ async function loadReservationOptions() {
     error.value = err.message
   } finally {
     loadingOptions.value = false
+  }
+}
+
+async function loadSelectedRoute() {
+  const cachedRoute = getCachedPublicRoute(route.params.id, route.query.data)
+
+  if (cachedRoute) {
+    selectedTicket.value = cachedRoute
+  }
+
+  if (!tenantState.clientUid) {
+    routeLoading.value = false
+    return
+  }
+
+  routeLoading.value = !cachedRoute
+
+  try {
+    const response = await listPublicRoutes({
+      client_uid: tenantState.clientUid,
+      rota_id: route.params.id,
+      ...(route.query.data ? { data: route.query.data } : {}),
+    })
+    const routes = normalizeApiCollection(response, 'rotas')
+    const apiRoute = routes.find((item) => String(item.id) === String(route.params.id))
+
+    if (apiRoute) {
+      const mappedRoute = mapPublicRouteToTicket(apiRoute, route.query.data)
+      selectedTicket.value = mappedRoute
+      cachePublicTickets([...publicRouteState.routes, mappedRoute])
+    }
+  } catch (err) {
+    error.value = err.message
+  } finally {
+    routeLoading.value = false
   }
 }
 
@@ -281,6 +325,26 @@ function formatCurrencyValue(value) {
   }
 
   return numberValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+}
+
+function splitTextBlocks(value) {
+  return String(value || '')
+    .split(/\n+/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+}
+
+function parseNoticeItem(value) {
+  const index = value.indexOf(':')
+
+  if (index <= 0) {
+    return { title: '', body: value }
+  }
+
+  return {
+    title: value.slice(0, index + 1),
+    body: value.slice(index + 1).trim(),
+  }
 }
 
 function onlyDigits(value) {
@@ -476,6 +540,20 @@ function canContinuePassengerStep() {
   return true
 }
 
+function canContinueToPayment() {
+  if (!canContinuePassengerStep()) {
+    return false
+  }
+
+  if (!termsAccepted.value) {
+    stepError.value = 'E necessario aceitar os termos de uso e a politica de privacidade para continuar.'
+    return false
+  }
+
+  stepError.value = ''
+  return true
+}
+
 function goToStep(step) {
   if (step === 1) {
     currentStep.value = 1
@@ -488,7 +566,7 @@ function goToStep(step) {
     return
   }
 
-  if (step === 3 && !canContinuePassengerStep()) {
+  if (step === 3 && !canContinueToPayment()) {
     currentStep.value = 2
     return
   }
@@ -505,6 +583,11 @@ async function submitReservation() {
 
   if (!canContinuePassengerStep()) {
     currentStep.value = 2
+    return
+  }
+
+  if (!termsAccepted.value) {
+    error.value = 'E necessario aceitar os termos e a politica de privacidade para continuar.'
     return
   }
 
@@ -553,8 +636,24 @@ async function submitReservation() {
 
 <template>
   <main class="bg-slate-50 px-4 py-10 sm:px-6">
-    <section v-if="!ticket" class="mx-auto max-w-3xl rounded-lg bg-white p-8 text-center shadow">
+    <section v-if="routeLoading" class="mx-auto grid max-w-6xl gap-6 lg:grid-cols-[0.78fr_1.22fr]">
+      <aside class="h-max rounded-lg bg-white p-5 shadow">
+        <div class="h-56 w-full animate-pulse rounded bg-slate-200"></div>
+        <div class="mt-5 h-4 w-28 animate-pulse rounded bg-slate-200"></div>
+        <div class="mt-3 h-8 w-3/4 animate-pulse rounded bg-slate-200"></div>
+        <div class="mt-3 h-4 w-1/2 animate-pulse rounded bg-slate-200"></div>
+      </aside>
+      <div class="rounded-lg bg-white p-5 shadow">
+        <div class="h-8 w-48 animate-pulse rounded bg-slate-200"></div>
+        <div class="mt-5 grid gap-3">
+          <div v-for="item in 4" :key="item" class="h-14 animate-pulse rounded bg-slate-200"></div>
+        </div>
+      </div>
+    </section>
+
+    <section v-else-if="!ticket" class="mx-auto max-w-3xl rounded-lg bg-white p-8 text-center shadow">
       <h1 class="text-2xl font-black text-sky-950">Rota nao encontrada</h1>
+      <p v-if="error" class="mt-3 rounded bg-amber-50 p-3 text-sm font-bold text-amber-800">{{ error }}</p>
       <RouterLink class="mt-4 inline-flex font-bold text-sky-600" to="/">Voltar para passagens</RouterLink>
     </section>
 
@@ -830,8 +929,11 @@ async function submitReservation() {
             <div class="mt-4">
               <div class="mb-3 flex items-center justify-between gap-3">
                 <p class="text-sm font-black uppercase text-sky-950">Adicionais</p>
-                <span class="rounded-full bg-white px-3 py-1 text-xs font-black text-slate-500">
-                  {{ adicionaisOptions.length }} opcao{{ adicionaisOptions.length === 1 ? '' : 'es' }}
+                <span v-if="loadingOptions" class="rounded-full bg-white px-3 py-1 text-xs font-black text-slate-500">
+                  Carregando...
+                </span>
+                <span v-else-if="adicionaisOptions.length" class="rounded-full bg-white px-3 py-1 text-xs font-black text-slate-500">
+                  {{ adicionaisOptions.length }} adicional{{ adicionaisOptions.length === 1 ? '' : 'is' }}
                 </span>
               </div>
 
@@ -915,13 +1017,57 @@ async function submitReservation() {
             </p>
           </section>
 
+          <section class="mt-5 rounded-lg bg-white p-4 shadow-sm ring-1 ring-slate-100">
+            <div class="border-b border-slate-200 pb-3">
+              <h3 class="text-sm font-black text-sky-950">Avisos da reserva</h3>
+            </div>
+
+            <div class="mt-4 space-y-4 text-xs font-semibold leading-relaxed text-amber-800">
+              <p v-for="(item, index) in noticeItems" :key="index">
+                <strong v-if="item.title">{{ item.title }}</strong>
+                {{ item.body }}
+              </p>
+            </div>
+          </section>
+
+          <section class="mt-4 rounded-lg border border-slate-200 bg-white p-4">
+            <div class="flex items-start gap-3">
+              <label class="mt-0.5 inline-flex cursor-pointer items-center">
+                <input v-model="termsAccepted" class="sr-only" type="checkbox" />
+                <span
+                  class="relative inline-flex h-7 w-12 rounded-full transition"
+                  :class="termsAccepted ? 'bg-[var(--brand-primary)]' : 'bg-slate-300'"
+                >
+                  <span
+                    class="absolute top-1 grid size-5 place-items-center rounded-full bg-white shadow transition"
+                    :class="termsAccepted ? 'left-6' : 'left-1'"
+                  ></span>
+                </span>
+              </label>
+
+              <div class="min-w-0 flex-1 text-sm font-semibold text-slate-600">
+                <p>
+                  Li e aceito os
+                  <RouterLink class="font-black text-[var(--brand-primary)] underline" :to="{ name: 'terms' }" target="_blank" rel="noreferrer">
+                    termos de uso
+                  </RouterLink>
+                  e
+                  <RouterLink class="font-black text-[var(--brand-primary)] underline" :to="{ name: 'privacy' }" target="_blank" rel="noreferrer">
+                    politica de privacidade
+                  </RouterLink>
+                  .
+                </p>
+              </div>
+            </div>
+          </section>
+
           <p v-if="stepError" class="mt-5 rounded bg-amber-50 p-3 text-sm font-bold text-amber-800">{{ stepError }}</p>
 
           <div class="mt-6 flex flex-wrap items-center justify-between gap-3">
             <button class="h-11 rounded border border-slate-300 px-5 text-sm font-black text-slate-600" type="button" @click="goToStep(1)">
               Voltar
             </button>
-            <button class="h-11 rounded bg-[var(--brand-primary)] px-6 text-sm font-black uppercase text-white" type="submit">
+            <button class="h-11 rounded bg-[var(--brand-primary)] px-6 text-sm font-black uppercase text-white disabled:bg-slate-300" type="submit" :disabled="!termsAccepted">
               Continuar para pagamento
             </button>
           </div>
@@ -1117,7 +1263,7 @@ async function submitReservation() {
             <button class="h-11 rounded border border-slate-300 px-5 text-sm font-black text-slate-600" type="button" @click="goToStep(2)">
               Voltar
             </button>
-            <button class="flex h-12 items-center justify-center gap-2 rounded bg-[var(--brand-primary)] px-6 text-sm font-black uppercase text-white disabled:bg-slate-300" :disabled="submitting">
+            <button class="flex h-12 items-center justify-center gap-2 rounded bg-[var(--brand-primary)] px-6 text-sm font-black uppercase text-white disabled:bg-slate-300" :disabled="submitting || !termsAccepted">
               <Ship class="size-4" />
               {{ submitting ? 'Criando reserva...' : 'Criar reserva' }}
             </button>

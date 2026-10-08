@@ -1,13 +1,14 @@
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { ArrowLeft, CalendarDays, MapPin, Search, Ship, UsersRound } from '@lucide/vue'
+import AvailableDatePicker from '../components/AvailableDatePicker.vue'
 import TicketGrid from '../components/TicketGrid.vue'
-import { tickets } from '../data'
 import { listPublicBoats, listPublicRoutes } from '../services/customerApi'
-import { cachePublicRoutes } from '../stores/publicRouteStore'
+import { cachePublicRoutes, cachePublicTickets, mapPublicRouteToTicket } from '../stores/publicRouteStore'
 import { tenantState } from '../stores/tenantStore'
 import { formatDateBr, getTodayDateInputValue, normalizeApiCollection } from '../utils/formatters'
+import { getAvailableDatePrices, getAvailableDates } from '../utils/routeDiscovery'
 
 const route = useRoute()
 const router = useRouter()
@@ -22,13 +23,14 @@ const tripSearch = reactive({
 })
 
 const routeResults = ref(null)
+const routeCatalog = ref(null)
 const boats = ref([])
 const apiSummary = ref(null)
 const loadingBoats = ref(false)
-const loadingRoutes = ref(false)
+const loadingRoutes = ref(true)
 const routesError = ref('')
-const usingFallback = ref(false)
 const selectedPriceRanges = ref([])
+let searchChangeTimer = null
 
 const priceRanges = [
   { label: 'R$ 0 - R$ 100', min: 0, max: 100 },
@@ -39,7 +41,7 @@ const priceRanges = [
 ]
 
 const visibleTickets = computed(() => {
-  const source = routeResults.value ?? tickets
+  const source = routeResults.value ?? []
 
   return source.filter((ticket) => {
     const originMatches = !tripSearch.origin || ticket.origin === tripSearch.origin
@@ -53,13 +55,30 @@ const visibleTickets = computed(() => {
   })
 })
 
-const originOptions = computed(() => getUniqueOptions(routeResults.value || tickets, 'origin'))
-const destinationOptions = computed(() => getUniqueOptions(routeResults.value || tickets, 'destination'))
+const discoveryRoutes = computed(() => routeCatalog.value?.length ? routeCatalog.value : routeResults.value ?? [])
+const originOptions = computed(() => getUniqueOptions(discoveryRoutes.value, 'origin'))
+const destinationOptions = computed(() => getUniqueOptions(discoveryRoutes.value, 'destination'))
 const selectedBoat = computed(() => boats.value.find((boat) => String(boat.id) === String(tripSearch.embarcacaoId)))
+const availableDates = computed(() => getAvailableDates(discoveryRoutes.value, {
+  origin: tripSearch.origin,
+  destination: tripSearch.destination,
+  embarcacaoId: tripSearch.embarcacaoId,
+}))
+const availableDatePrices = computed(() => getAvailableDatePrices(discoveryRoutes.value, {
+  origin: tripSearch.origin,
+  destination: tripSearch.destination,
+  embarcacaoId: tripSearch.embarcacaoId,
+}))
 
 onMounted(async () => {
   await loadBoats()
+  await fetchRouteCatalog()
+  syncDateWithAvailability()
   await fetchRoutes()
+})
+
+onBeforeUnmount(() => {
+  window.clearTimeout(searchChangeTimer)
 })
 
 function getUniqueOptions(items, key) {
@@ -84,6 +103,8 @@ async function loadBoats() {
 }
 
 async function submitSearch() {
+  syncDateWithAvailability()
+
   await router.replace({
     name: 'filter',
     query: {
@@ -97,20 +118,53 @@ async function submitSearch() {
   await fetchRoutes()
 }
 
+function searchAfterFilterChange() {
+  syncDateWithAvailability()
+  window.clearTimeout(searchChangeTimer)
+  searchChangeTimer = window.setTimeout(() => {
+    submitSearch()
+  }, 200)
+}
+
 async function selectBoat(boatId) {
   tripSearch.embarcacaoId = boatId
+  syncDateWithAvailability()
   await submitSearch()
+}
+
+function syncDateWithAvailability() {
+  if (!availableDates.value.length || availableDates.value.includes(tripSearch.departureDate)) {
+    return
+  }
+
+  tripSearch.departureDate = availableDates.value[0]
+}
+
+async function fetchRouteCatalog() {
+  if (!tenantState.clientUid) {
+    return
+  }
+
+  try {
+    const response = await listPublicRoutes({
+      client_uid: tenantState.clientUid,
+    })
+    const routes = normalizeApiCollection(response, 'rotas')
+    routeCatalog.value = cachePublicTickets(routes.map((item) => mapPublicRouteToTicket(item, tripSearch.departureDate)))
+  } catch {
+    routeCatalog.value = null
+  }
 }
 
 async function fetchRoutes() {
   if (!tenantState.clientUid) {
-    routeResults.value = null
+    routeResults.value = []
+    loadingRoutes.value = false
     return
   }
 
   loadingRoutes.value = true
   routesError.value = ''
-  usingFallback.value = false
 
   try {
     const params = {
@@ -133,14 +187,16 @@ async function fetchRoutes() {
       boat: responseBoat,
     }
     routeResults.value = cachePublicRoutes(routes, tripSearch.departureDate, responseBoat)
+    if (routeCatalog.value?.length) {
+      cachePublicTickets([...routeCatalog.value, ...routeResults.value])
+    }
   } catch (error) {
     routesError.value = error.message
-    usingFallback.value = true
-    routeResults.value = null
+    routeResults.value = []
     apiSummary.value = {
       date: tripSearch.departureDate,
       weekday: '',
-      total: tickets.length,
+      total: 0,
       boat: selectedBoat.value || null,
     }
   } finally {
@@ -210,7 +266,7 @@ async function fetchRoutes() {
           <div class="grid gap-4 lg:grid-cols-[1fr_1fr_1fr_0.85fr_auto]">
             <label class="flex h-14 items-center gap-2 rounded-lg border border-slate-400 px-4 text-slate-500">
               <MapPin class="size-5 text-[var(--brand-primary)]" />
-              <select v-model="tripSearch.origin" class="w-full bg-transparent font-semibold outline-none">
+              <select v-model="tripSearch.origin" class="w-full bg-transparent font-semibold outline-none" @change="searchAfterFilterChange">
                 <option value="">Origem</option>
                 <option v-for="origin in originOptions" :key="origin" :value="origin">{{ origin }}</option>
               </select>
@@ -218,7 +274,7 @@ async function fetchRoutes() {
 
             <label class="flex h-14 items-center gap-2 rounded-lg border border-slate-400 px-4 text-slate-700">
               <MapPin class="size-5 text-[var(--brand-primary)]" />
-              <select v-model="tripSearch.destination" class="w-full bg-transparent font-semibold outline-none">
+              <select v-model="tripSearch.destination" class="w-full bg-transparent font-semibold outline-none" @change="searchAfterFilterChange">
                 <option value="">Destino</option>
                 <option v-for="destination in destinationOptions" :key="destination" :value="destination">
                   {{ destination }}
@@ -228,12 +284,12 @@ async function fetchRoutes() {
 
             <label class="flex h-14 items-center gap-2 rounded-lg border border-slate-400 px-4 text-slate-500">
               <CalendarDays class="size-5 text-[var(--brand-primary)]" />
-              <input v-model="tripSearch.departureDate" required class="w-full bg-transparent font-semibold outline-none" type="date" />
+              <AvailableDatePicker v-model="tripSearch.departureDate" :available-dates="availableDates" :date-prices="availableDatePrices" @change="searchAfterFilterChange" />
             </label>
 
             <label class="flex h-14 items-center gap-2 rounded-lg border border-slate-400 px-4 text-slate-700">
               <UsersRound class="size-5 text-[var(--brand-primary)]" />
-              <select v-model.number="tripSearch.passengers" class="w-full bg-transparent font-semibold outline-none">
+              <select v-model.number="tripSearch.passengers" class="w-full bg-transparent font-semibold outline-none" @change="searchAfterFilterChange">
                 <option :value="1">1 Passageiro</option>
                 <option :value="2">2 Passageiros</option>
                 <option :value="3">3 Passageiros</option>
@@ -310,12 +366,11 @@ async function fetchRoutes() {
         </div>
 
         <p v-if="routesError" class="mb-4 rounded bg-amber-50 p-4 text-sm font-bold text-amber-800">
-          Nao foi possivel carregar a API agora. Mostrando dados de exemplo para desenvolvimento.
+          Nao foi possivel carregar as rotas agora. Tente novamente em instantes.
         </p>
 
         <TicketGrid
           title="Rotas disponiveis"
-          :subtitle="usingFallback ? 'Dados de exemplo' : ''"
           :tickets="visibleTickets"
           :total-count="visibleTickets.length"
           :loading="loadingRoutes"

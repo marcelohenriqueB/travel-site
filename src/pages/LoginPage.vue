@@ -4,6 +4,7 @@ import { useRoute, useRouter, RouterLink } from 'vue-router'
 import { ArrowLeft, Eye, EyeOff, IdCard, LockKeyhole, LogIn, Mail, Phone, ShieldCheck, UserPlus, UserRound } from '@lucide/vue'
 import { loginCustomer, registerCustomer } from '../stores/authStore'
 import { tenantState } from '../stores/tenantStore'
+import { formatCpfCnpj, formatPhone, onlyDigits } from '../utils/documentFormatters'
 
 const route = useRoute()
 const router = useRouter()
@@ -63,6 +64,8 @@ async function submitRegister() {
   loading.value = true
   error.value = ''
   success.value = ''
+  const telefone = onlyDigits(registerForm.telefone)
+  const cpfCnpj = onlyDigits(registerForm.cpf_cnpj)
 
   if (registerForm.senha !== registerForm.confirmar_senha) {
     error.value = 'As senhas informadas nao conferem.'
@@ -70,7 +73,7 @@ async function submitRegister() {
     return
   }
 
-  if (!registerForm.cpf_cnpj && !registerForm.telefone) {
+  if (!cpfCnpj && !telefone) {
     error.value = 'Informe CPF/CNPJ ou telefone para criar o cadastro.'
     loading.value = false
     return
@@ -81,15 +84,15 @@ async function submitRegister() {
       clientUid: tenantState.clientUid,
       nome: registerForm.nome,
       email: registerForm.email,
-      telefone: registerForm.telefone,
-      cpfCnpj: registerForm.cpf_cnpj,
+      telefone,
+      cpfCnpj,
       senha: registerForm.senha,
     })
 
     if (!response.access) {
       await loginCustomer({
         clientUid: tenantState.clientUid,
-        identificador: registerForm.cpf_cnpj || registerForm.telefone || registerForm.email,
+        identificador: cpfCnpj || telefone || registerForm.email,
         senha: registerForm.senha,
       })
     }
@@ -257,7 +260,7 @@ async function submitRegister() {
             </span>
           </label>
 
-          <div class="grid gap-5 sm:grid-cols-2">
+          <div class="grid gap-5">
             <label class="grid gap-2 text-sm font-bold text-slate-600">
               Telefone
               <span class="flex h-13 items-center gap-3 rounded-lg border border-slate-300 bg-white px-4 ring-[var(--brand-primary)]/20 focus-within:border-[var(--brand-primary)] focus-within:ring-4">
@@ -267,7 +270,8 @@ async function submitRegister() {
                   autocomplete="tel"
                   inputmode="tel"
                   class="h-full min-w-0 flex-1 border-0 bg-transparent p-0 text-slate-900 outline-none placeholder:text-slate-400"
-                  placeholder="92999999999"
+                  placeholder="(92) 99999-9999"
+                  @input="registerForm.telefone = formatPhone(registerForm.telefone)"
                 />
               </span>
             </label>
@@ -281,7 +285,8 @@ async function submitRegister() {
                   autocomplete="off"
                   inputmode="numeric"
                   class="h-full min-w-0 flex-1 border-0 bg-transparent p-0 text-slate-900 outline-none placeholder:text-slate-400"
-                  placeholder="Somente numeros"
+                  placeholder="000.000.000-00"
+                  @input="registerForm.cpf_cnpj = formatCpfCnpj(registerForm.cpf_cnpj)"
                 />
               </span>
             </label>

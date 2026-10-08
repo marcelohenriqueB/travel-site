@@ -59,7 +59,7 @@ const resultCount = computed(() => props.totalCount ?? props.tickets.length)
     <div v-else class="mt-8 grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
       <article
         v-for="ticket in tickets"
-        :key="ticket.id"
+        :key="ticket.cacheKey || `${ticket.id}-${ticket.departure || ''}`"
         class="group overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm transition hover:-translate-y-1 hover:shadow-xl"
       >
         <img class="h-40 w-full object-cover transition duration-300 group-hover:scale-105" :src="ticket.image" :alt="ticket.boat" />
@@ -107,7 +107,7 @@ const resultCount = computed(() => props.totalCount ?? props.tickets.length)
           <RouterLink
             :data-testid="`reserve-ticket-${ticket.id}`"
             class="mt-5 flex h-11 w-full items-center justify-center gap-2 rounded bg-[var(--brand-primary)] text-sm font-black text-white transition hover:brightness-95"
-            :to="`/reserva/${ticket.id}`"
+            :to="{ name: 'reservation', params: { id: ticket.id }, query: { data: ticket.departure } }"
           >
             <Ship class="size-4" />
             Reservar

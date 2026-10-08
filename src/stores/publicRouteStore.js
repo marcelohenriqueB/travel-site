@@ -28,6 +28,7 @@ export function mapPublicRouteToTicket(route, fallbackDate, boat = null) {
 
   return {
     id: route.id,
+    cacheKey: `${route.id}-${route.data_reserva || route.data || fallbackDate || ''}`,
     boat: routeBoat?.nome || route.embarcacao_nome || route.nome || `${origin} x ${destination}`,
     type: route.descricao || 'Rota publica',
     origin,
@@ -38,20 +39,45 @@ export function mapPublicRouteToTicket(route, fallbackDate, boat = null) {
     arrivalTime: route.horario_chegada,
     price: value ? value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : 'Valor no backend',
     value,
+    embarcacaoId: route.embarcacao_id || routeBoat?.id || '',
+    total_buscas: route.total_buscas,
+    buscas: route.buscas,
+    procuras: route.procuras,
+    total_procuras: route.total_procuras,
+    search_count: route.search_count,
+    popularidade: route.popularidade,
+    total_reservas: route.total_reservas,
+    reservas_count: route.reservas_count,
+    reservas: route.reservas,
     seats: route.vagas_disponiveis,
     capacity: route.capacidade_diaria,
     reserved: route.passageiros_reservados,
-    image: routeBoat?.foto_url || route.embarcacao_foto_url || route.foto_url || heroImage,
+    image: route.foto_url || routeBoat?.foto_url || route.embarcacao_foto_url || heroImage,
     raw: route,
   }
 }
 
-export function cachePublicRoutes(routes, fallbackDate, boat = null) {
-  const mappedRoutes = routes.map((route) => mapPublicRouteToTicket(route, fallbackDate, boat))
-  writeRoutes(mappedRoutes)
-  return mappedRoutes
+export function cachePublicTickets(routes) {
+  const dedupedRoutes = [...routes]
+    .reverse()
+    .filter((route, index, source) => {
+      const routeKey = `${route.id}-${route.departure || ''}`
+      return source.findIndex((item) => `${item.id}-${item.departure || ''}` === routeKey) === index
+    })
+    .reverse()
+
+  writeRoutes(dedupedRoutes)
+  return dedupedRoutes
 }
 
-export function getCachedPublicRoute(id) {
-  return publicRouteState.routes.find((route) => String(route.id) === String(id))
+export function cachePublicRoutes(routes, fallbackDate, boat = null) {
+  const mappedRoutes = routes.map((route) => mapPublicRouteToTicket(route, fallbackDate, boat))
+  return cachePublicTickets(mappedRoutes)
+}
+
+export function getCachedPublicRoute(id, departure = '') {
+  return publicRouteState.routes.find((route) => (
+    String(route.id) === String(id) &&
+    (!departure || route.departure === departure)
+  ))
 }

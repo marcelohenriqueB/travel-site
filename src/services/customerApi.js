@@ -1,3 +1,5 @@
+import { onlyDigits } from '../utils/documentFormatters'
+
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || ''
 const PUBLIC_ROUTES_ENDPOINT = '/api/customer/rotas-publicas/'
 const PUBLIC_BOATS_ENDPOINT = '/api/customer/embarcacoes-publicas/'
@@ -72,28 +74,51 @@ export async function customerLogin({ clientUid, identificador, senha }) {
 }
 
 export async function customerRegister({ clientUid, nome, email, telefone, cpfCnpj, cpf_cnpj, senha }) {
+  const phoneDigits = onlyDigits(telefone)
+  const cpfCnpjDigits = onlyDigits(cpf_cnpj || cpfCnpj)
+
   return apiRequest('/api/customer/register/', {
     method: 'POST',
     body: JSON.stringify({
       client_uid: clientUid,
       nome,
       email,
-      telefone,
-      cpf_cnpj: cpf_cnpj || cpfCnpj,
+      telefone: phoneDigits,
+      cpf_cnpj: cpfCnpjDigits,
       senha,
     }),
   })
 }
 
-export async function forgotCustomerPassword({ clientUid, identificador }) {
+export function buildCustomerIdentifierPayload(identificador) {
   const value = String(identificador || '').trim()
+  const isEmail = value.includes('@')
+  const digits = onlyDigits(value)
 
+  return {
+    identificador: value,
+    ...(isEmail ? { email: value } : {}),
+    ...(!isEmail && digits ? { cpf_cnpj: value, telefone: value } : {}),
+  }
+}
+
+export async function forgotCustomerPassword({ clientUid, identificador }) {
   return apiRequest('/api/customer/password/forgot/', {
     method: 'POST',
     body: JSON.stringify({
       client_uid: clientUid,
-      identificador: value,
-      ...(value.includes('@') ? { email: value } : {}),
+      ...buildCustomerIdentifierPayload(identificador),
+    }),
+  })
+}
+
+export async function verifyCustomerPasswordCode({ clientUid, identificador, codigo }) {
+  return apiRequest('/api/customer/password/verify-code/', {
+    method: 'POST',
+    body: JSON.stringify({
+      client_uid: clientUid,
+      ...buildCustomerIdentifierPayload(identificador),
+      codigo,
     }),
   })
 }
